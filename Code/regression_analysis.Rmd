@@ -1,0 +1,116 @@
+---
+title: "Regression Analysis"
+output: html_document
+date: "2023-03-29"
+---
+
+# Data Preparation
+
+## Twitter Data
+
+```{r}
+twitter.raw <- read.csv('../Data/twitter_data.csv', sep = ';')
+str(twitter.raw)
+```
+
+```{r}
+library('lubridate')
+
+twitter.hourly <- twitter.raw[,1:10]
+str(twitter.hourly) 
+twitter.hourly$Date <- ymd_hms(twitter.hourly$Date)
+summary(twitter.hourly)
+```
+
+```{r}
+min_date <- min(twitter.hourly$Date)
+max_date <- max(twitter.hourly$Date)
+min_date.string <- format(min_date, '%Y%m%d')
+max_date.string <- format(max_date, '%Y%m%d')
+```
+
+Looks like we have some NA values that we will need to deal with.
+
+## Bitcoin Data
+
+For the crypto data, we will handle this by getting our crypto pricing info from another source. We will use the package crypto2 to source this data.
+
+```{r}
+install.packages('kernlab')
+install.packages('crypto2')
+install.packages('rlang')
+install.packages('vctrs')
+library(vctrs)
+library(rlang)
+library(kernlab)
+library(crypto2)
+
+```
+
+```{r}
+
+if (file.exists('../Data/bitcoin_daily.csv') == FALSE)
+  {
+
+   bitcoin.daily <- crypto_history(
+                                  # coin_list = 'BTC',
+                                  convert = "USD",
+                                  limit = 1,
+                                  start_date = min_date.string,
+                                  end_date = max_date.string,
+                                  interval = 'daily',
+                                  sleep = 0,
+                                  finalWait = FALSE
+                                  )
+   
+   write.csv(bitcoin.daily, "../Data/bitcoin_daily.csv")
+   
+} else 
+  {
+  bitcoin.daily <- read.csv("../Data/bitcoin_daily.csv")
+  }
+
+
+```
+
+It looks like we are having trouble extracting the bitcoin price at an hourly interval. This package only supports daily intervals. As such, we must get our data from another source. The most obvious choice is using the bitcoin price that was included in the Twitter data. We will discuss why we chose this further on under the heading "Handling missing data".
+
+```{r}
+bitcoin.hourly <- twitter.raw[,c(1,11,12,13,14,15,16)]
+bitcoin.hourly$Date <- ymd_hms(bitcoin.hourly$Date)
+str(bitcoin.hourly)
+```
+
+## Reddit Data
+
+Now we need to bring in the data around sentiment analysis for Reddit comments.
+
+```{r}
+reddit.hourly <- read.csv('reddit_agg_by_hour.csv')
+reddit.hourly.subreddit <- read.csv('reddit_agg_by_subreddit_by_hour.csv')
+
+reddit.hourly$datetime <- ymd_hms(reddit.hourly$datetime)
+reddit.hourly.subreddit$datetime <- ymd_hms(reddit.hourly.subreddit$datetime)
+```
+
+Lets go ahead and do some transformations on it, in case we want to do analysis at different intervals like a daily interval.
+
+```{r}
+library('dplyr')
+reddit.hourly$day <- ymd(format(reddit.hourly$datetime, '%Y-%m-%d'))
+reddit.daily = reddit.hourly %>% group_by(day)  %>%
+                    summarise(total_comments = sum(created_utc),
+                              positive = sum(positive),
+                              negative = sum(negative),
+                              neutral = sum(neutral),
+                              .groups = 'drop')
+
+reddit.hourly.subreddit$day <- ymd(format(reddit.hourly.subreddit$datetime, '%Y-%m-%d'))
+reddit.subreddit.daily = reddit.hourly.subreddit %>% group_by(day, subreddit)  %>%
+                                summarise(total_comments = sum(unique_items),
+                                positive = sum(positive),
+                                negative = sum(negative),
+                                neutral = sum(neutral),
+                                .groups = 'drop')
+
+```
