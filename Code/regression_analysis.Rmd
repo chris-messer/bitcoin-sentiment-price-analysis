@@ -19,17 +19,36 @@ library('lubridate')
 twitter.hourly <- twitter.raw[,1:10]
 str(twitter.hourly) 
 twitter.hourly$Date <- ymd_hms(twitter.hourly$Date)
-summary(twitter.hourly)
+head(twitter.hourly)
 ```
 
 ```{r}
 min_date <- min(twitter.hourly$Date)
 max_date <- max(twitter.hourly$Date)
-min_date.string <- format(min_date, '%Y%m%d')
+#minus one as date filter below is exclusive not inclusive
+min_date.string <- format(min_date - 1, '%Y%m%d')  
 max_date.string <- format(max_date, '%Y%m%d')
 ```
 
 Looks like we have some NA values that we will need to deal with.
+
+Let's go ahead an aggregate into daily values as well.
+
+```{r}
+# build a new dataframe with 0's for the NA values so we can sum accros them
+
+twitter.hourly$day <- ymd(format(twitter.hourly$Date, '%Y-%m-%d'))
+
+twitter.daily <- twitter.hourly[is.na(twitter.hourly$Compound_Score) == F,] %>%                        group_by(day)  %>%
+                    summarise(total_tweets = sum(Total.Volume.of.Tweets),
+                              positive_tweets = sum(Count_Positives),
+                              negative_tweets = sum(Count_Negatives),
+                              neutral_tweets = sum(Count_Neutrals),
+                              sent_negatives = mean(Sent_Negatives),
+                              Sent_positives = mean(Sent_Positives),
+                              .groups = 'drop')
+head(twitter.daily)
+```
 
 ## Bitcoin Data
 
@@ -63,14 +82,22 @@ if (file.exists('../Data/bitcoin_daily.csv') == FALSE)
                                   finalWait = FALSE
                                   )
    
+   bitcoin.daily$timestamp <- ymd(
+     format(
+       ymd_hms(
+         bitcoin.daily$timestamp), '%Y%m%d'))
+   
+   colnames(bitcoin.daily)[1] <- 'day'
+   
    write.csv(bitcoin.daily, "../Data/bitcoin_daily.csv")
    
 } else 
   {
   bitcoin.daily <- read.csv("../Data/bitcoin_daily.csv")
+  bitcoin.daily$day <- ymd(bitcoin.daily$day)
   }
 
-
+bitcoin.daily
 ```
 
 It looks like we are having trouble extracting the bitcoin price at an hourly interval. This package only supports daily intervals. As such, we must get our data from another source. The most obvious choice is using the bitcoin price that was included in the Twitter data. We will discuss why we chose this further on under the heading "Handling missing data".
@@ -183,4 +210,17 @@ reddit.daily.subreddit.top10_cast <- dcast(reddit.daily.subreddit.top10_melt, da
 # Hourly
 reddit.hourly.subreddit.top10_melt <- melt(reddit.hourly.subreddit.top10[,-7], id.vars=1:2)
 reddit.hourly.subreddit.top10_cast <- dcast(reddit.hourly.subreddit.top10_melt, datetime ~ subreddit + variable, value.var = 'value')
+```
+
+## Bringing it all together
+
+Now, we will need to join our data to make a unified dataframe from which to run our regression analyses on.
+
+```{r}
+data.daily <- merge(twitter.daily, bitcoin.daily, suffixes = '_T', no.dups = T)
+
+data.daily <- twitter.daily %>% merge(bitcoin.daily, suffixes = '_T', no.dups = T)
+write.csv(reddit.daily, '../Data/reddit_daily.csv')
+
+reddit.daily
 ```
