@@ -6,6 +6,24 @@ date: "2023-03-29"
 
 # Data Preparation
 
+```{r}
+#install.packages('kernlab')
+#install.packages('crypto2')
+#install.packages('rlang')
+#install.packages('vctrs')
+library(vctrs)
+library(rlang)
+library(kernlab)
+library(crypto2)
+library('lubridate')
+library('dplyr')
+library(reshape2)
+library(glue)
+library(qcc)
+library(tidyverse)
+library(data.table)
+```
+
 ## Twitter Data
 
 ```{r}
@@ -14,7 +32,7 @@ str(twitter.raw)
 ```
 
 ```{r}
-library('lubridate')
+
 
 twitter.hourly <- twitter.raw[,1:10]
 str(twitter.hourly) 
@@ -36,8 +54,8 @@ Let's go ahead an aggregate into daily values as well.
 
 ```{r}
 # build a new dataframe with 0's for the NA values so we can sum accros them
-
-twitter.hourly$day <- ymd(format(twitter.hourly$Date, '%Y-%m-%d'))
+names(twitter.hourly)[names(twitter.hourly) == 'Date'] <- 'datetime'
+twitter.hourly$day <- ymd(format(twitter.hourly$datetime, '%Y-%m-%d'))
 
 twitter.daily <- twitter.hourly[is.na(twitter.hourly$Compound_Score) == F,] %>%                        group_by(day)  %>%
                     summarise(total_tweets = sum(Total.Volume.of.Tweets),
@@ -55,14 +73,7 @@ head(twitter.daily)
 For the crypto data, we will handle this by getting our crypto pricing info from another source. We will use the package crypto2 to source this data.
 
 ```{r}
-#install.packages('kernlab')
-#install.packages('crypto2')
-#install.packages('rlang')
-#install.packages('vctrs')
-library(vctrs)
-library(rlang)
-library(kernlab)
-library(crypto2)
+
 
 ```
 
@@ -104,7 +115,9 @@ It looks like we are having trouble extracting the bitcoin price at an hourly in
 
 ```{r}
 bitcoin.hourly <- twitter.raw[,c(1,11,12,13,14,15,16)]
-bitcoin.hourly$Date <- ymd_hms(bitcoin.hourly$Date)
+names(bitcoin.hourly)[names(bitcoin.hourly) == 'Date'] <- 'datetime'
+names(bitcoin.hourly) <- tolower(names(bitcoin.hourly))
+bitcoin.hourly$datetime <- ymd_hms(bitcoin.hourly$datetime)
 str(bitcoin.hourly)
 ```
 
@@ -119,26 +132,38 @@ reddit.hourly.subreddit <- read.csv('reddit_agg_by_subreddit_by_hour.csv')
 reddit.hourly$datetime <- ymd_hms(reddit.hourly$datetime)
 reddit.hourly.subreddit$datetime <- ymd_hms(reddit.hourly.subreddit$datetime)
 names(reddit.hourly.subreddit)[names(reddit.hourly.subreddit) == "unique_items"] <- "total_comments"
+
+# rename some columns
+
+names(reddit.hourly)[names(reddit.hourly) == 'created_utc'] <- 'total_reddit'
+names(reddit.hourly)[names(reddit.hourly) == 'positive'] <- 'positive_reddit'
+names(reddit.hourly)[names(reddit.hourly) == 'negative'] <- 'negative_reddit'
+names(reddit.hourly)[names(reddit.hourly) == 'neutral'] <- 'neutral_reddit'
+
+names(reddit.hourly.subreddit)[names(reddit.hourly.subreddit) == 'total_comments'] <- 'total_reddit'
+names(reddit.hourly.subreddit)[names(reddit.hourly.subreddit) == 'positive'] <- 'positive_reddit'
+names(reddit.hourly.subreddit)[names(reddit.hourly.subreddit) == 'negative'] <- 'negative_reddit'
+names(reddit.hourly.subreddit)[names(reddit.hourly.subreddit) == 'neutral'] <- 'neutral_reddit'
 ```
 
 Lets go ahead and do some transformations on it, in case we want to do analysis at different intervals like a daily interval.
 
 ```{r}
-library('dplyr')
+
 reddit.hourly$day <- ymd(format(reddit.hourly$datetime, '%Y-%m-%d'))
 reddit.daily <- reddit.hourly %>% group_by(day)  %>%
-                    summarise(total_comments = sum(created_utc),
-                              positive = sum(positive),
-                              negative = sum(negative),
-                              neutral = sum(neutral),
+                    summarise(total_reddit = sum(total_reddit),
+                              positive_reddit = sum(positive_reddit),
+                              negative_reddit = sum(negative_reddit),
+                              neutral_reddit = sum(neutral_reddit),
                               .groups = 'drop')
 
 reddit.hourly.subreddit$day <- ymd(format(reddit.hourly.subreddit$datetime, '%Y-%m-%d'))
 reddit.daily.subreddit <- reddit.hourly.subreddit %>% group_by(day, subreddit)  %>%
-                                summarise(total_comments = sum(total_comments),
-                                positive = sum(positive),
-                                negative = sum(negative),
-                                neutral = sum(neutral),
+                                summarise(total_reddit = sum(total_reddit),
+                                positive_reddit = sum(positive_reddit),
+                                negative_reddit = sum(negative_reddit),
+                                neutral_reddit = sum(neutral_reddit),
                                 .groups = 'drop')
 
 
@@ -148,7 +173,6 @@ nrow(reddit.daily.subreddit)
 We now have our reddit data imported and aggregated at the correct levels. However, the dataset disaggregated by subreddit is very very large.
 
 ```{r}
-library(glue)
 
 print(glue("{nrow(reddit.daily.subreddit)} total rows,
            {length(unique(reddit.daily.subreddit$subreddit))} total unique subreddits"))
@@ -157,16 +181,16 @@ print(glue("{nrow(reddit.daily.subreddit)} total rows,
 Lets explore how frequently each of the subreddits get comments.
 
 ```{r}
-library(qcc)
-reddit.daily.subreddit.totals <- reddit.hourly.subreddit %>% group_by(subreddit)  %>%                                     summarise(total_comments = sum(total_comments),
-                                                         positive = sum(positive),
-                                                         negative = sum(negative),
-                                                         neutral = sum(neutral),
+
+reddit.daily.subreddit.totals <- reddit.hourly.subreddit %>% group_by(subreddit)  %>%                                     summarise(total_reddit = sum(total_reddit),
+                                                   positive_reddit = sum(positive_reddit),
+                                                   negative_reddit = sum(negative_reddit),
+                                                   neutral_reddit = sum(neutral_reddit),
                                                          .groups = 'drop')
 reddit.daily.subreddit.totals <- reddit.daily.subreddit.totals[
-  order(-reddit.daily.subreddit.totals$total_comments),]
+  order(-reddit.daily.subreddit.totals$total_reddit),]
 
-total_comments <- reddit.daily.subreddit.totals[["total_comments"]]
+total_comments <- reddit.daily.subreddit.totals[["total_reddit"]]
 names(total_comments) <- reddit.daily.subreddit.totals[["subreddit"]]
 
 total_comments.pareto <- pareto.chart(total_comments, plot=F)
@@ -188,7 +212,6 @@ As such, 10 out of 11k subreddits represent 66.6% of comments about bitcoin. As 
 
 ```{r}
 
-library(tidyverse)
 top_ten_subs <- row.names(total_comments.pareto)[0:10]
 reddit.daily.subreddit.top10 <- filter(reddit.daily.subreddit,
                        subreddit %in% top_ten_subs)
@@ -201,7 +224,6 @@ reddit.hourly.subreddit.top10 <- filter(reddit.hourly.subreddit,
 Now, since we will need to join each subreddit as it's own column (and one column for each of pos/neg/neutral sentiment), we will need to cast this data into a different structure.
 
 ```{r}
-library(reshape2)
 
 # Daily
 reddit.daily.subreddit.top10_melt <- melt(reddit.daily.subreddit.top10, id.vars=1:2)
@@ -217,10 +239,60 @@ reddit.hourly.subreddit.top10_cast <- dcast(reddit.hourly.subreddit.top10_melt, 
 Now, we will need to join our data to make a unified dataframe from which to run our regression analyses on.
 
 ```{r}
-data.daily <- merge(twitter.daily, bitcoin.daily, suffixes = '_T', no.dups = T)
 
-data.daily <- twitter.daily %>% merge(bitcoin.daily, suffixes = '_T', no.dups = T)
-write.csv(reddit.daily, '../Data/reddit_daily.csv')
 
-reddit.daily
+data.daily <- bitcoin.daily %>%
+  merge(twitter.daily, suffixes = '_T', no.dups = T) %>%
+  merge(reddit.daily, suffixes = '_R', no.dups = T)  %>%
+  merge(reddit.daily.subreddit.top10_cast, suffixes = '_R', no.dups = T)
+  
+data.hourly <- bitcoin.hourly %>%
+  merge(twitter.hourly, suffixes = '_T', no.dups = T) %>%
+  merge(reddit.hourly, suffixes = '_R', no.dups = T)  %>%
+  merge(reddit.hourly.subreddit.top10_cast, suffixes = '_R', no.dups = T)
+  
+# drop some not non-needed columns
+
+data.daily <- subset(data.daily, select = -c(X,id,slug,name,symbol,ref_cur,
+                time_open,time_close,time_high,time_low))
+```
+
+# Data Analysis
+
+As part of our analysis, we want to try different time-shifting intervals. i.e. does the price of bitcoin at time *t* depend on the sentiment at time *t-n* where n is the number of period back we shift. To faciliate this, we will write a function that takes in a dataframe, and shifts the closing price of bitcoin forward *n* periods, and returns a new data frame.
+
+```{r}
+all_vals.daily <- (names = colnames(data.daily))
+no_shift.daily <- c("day","close")
+shift_vals.daily <- all_vals.daily[! all_vals.daily %in% no_shift.daily]
+DT = data.table(year=2010:2014, v1=runif(5), v2=1:5, v3=letters[1:5])
+DT2 = copy(DT)
+cols = c("v2","v3")
+
+DT2[order(year), (cols) := shift(.SD, 2, type="lag"), .SDcols=cols]
+DT2[order(year)]
+DT
+
+```
+
+```{r}
+shift_df <- function(df, n){
+  dfc <- data.table(copy(df))
+  cols = c("close")
+
+  dfc[order(day), (cols) := shift(.SD, n, type="lag"), .SDcols=cols]
+  dfc
+}
+t2 <- data.hourly[is.na(data.hourly$close) == F,]
+t <- shift_df(na.omit(data.hourly,close),1)
+head(t)
+```
+
+Now, when we regress on a row of data, we are finding the coefficients -- that when multiplied by the independent variable values - equal to the bitcoin closing price *n* periods ahead.
+
+```{r}
+n <- 4
+lm.data <- shift_df(t2, n)[n+1:nrow(t2),c(3,6:52)]
+m1 <- lm(close~ Bitcoin_negative_reddit + open,na.omit(lm.data))
+summary(m1)
 ```
