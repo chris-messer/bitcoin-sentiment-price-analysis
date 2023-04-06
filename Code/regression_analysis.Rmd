@@ -1,0 +1,195 @@
+---
+title: "regression_analysis"
+output: html_document
+date: "2023-04-06"
+---
+
+```{r}
+#install.packages('corrplot')
+#install.packages('xts')
+library(corrplot)
+library(xts)
+library(vctrs)
+library(rlang)
+library(kernlab)
+library(crypto2)
+library('lubridate')
+library('dplyr')
+library(reshape2)
+library(glue)
+library(qcc)
+library(tidyverse)
+library(data.table)
+library(ggplot2)
+```
+
+```{r}
+data.daily <- read.csv('../Data/data_daily.csv')[,-1]
+data.hourly <- read.csv('../Data/data_hourly.csv')[,-1]
+```
+
+```{r}
+head(data.daily)
+head(data.hourly)
+```
+
+Now, lets drop the rows that have no information in the close column (due to the missing price data in the twitter input data. This was addressed in the data prep Rmd file.)
+
+```{r}
+
+data.hourly <-data.hourly[is.na(data.hourly$close) == F,]
+
+data.hourly$datetime <- ymd_hms(data.hourly$datetime)
+data.hourly$day <- ymd(data.hourly$day)
+
+data.daily$day <- ymd(data.daily$day)
+```
+
+# Data Analysis
+
+As part of our analysis, we want to try different time-shifting intervals. i.e. does the price of bitcoin at time *t* depend on the sentiment at time *t-n* where n is the number of period back we shift. To faciliate this, we will write a function that takes in a dataframe, and shifts the closing price of bitcoin backwards *n* periods, and returns a new data frame. This way, when we look at one row of data, we can see how the sentiment of reddit comments and tweets impact the price n periods from now.
+
+```{r}
+shift_df <- function(df, n){
+  dfc <- data.table(copy(df))
+  cols = c("close")
+  anscols = paste("lead", cols, sep="_")
+
+  dfc[order(day), (anscols) := shift(.SD, n, type="lead"), .SDcols=cols]
+  dfc <- dfc %>% mutate(price_dif = lead_close - close)
+  dfc <- dfc %>% mutate(price_dir = ifelse(price_dif >=0, 1,0))
+  
+}
+
+```
+
+Now, let's build a "kitchen sink model" where we use all of the predictors to predict the price movement.
+
+```{r}
+#set the lag/lead
+n <- 7
+
+#shift the close amount n periods forwards
+daily.shift_1.all.d <- shift_df(data.daily, n)
+
+#revome columns we want to exclude from analysis. Primarily, we are excluding the columns that are related to bitcoin price. Because we want to isolate the pricing movement and the sentiment that could have caused them, we do not want to include any of the pricing information that could give us a false confirmation that we have a model that predicts pricing movements, as it may only be predicting based on the input price information.
+
+#Note we also remove sent positive/negative, as these are aggregated scores at the daily/hourly level
+daily.shift_1.all.d <- daily.shift_1.all.d[1:(ncol(daily.shift_1.all.d)-1),
+                                           !c('open','high','low',
+                                              'close','price_dir','day',
+                                              'volume','market_cap','lead_close',
+                                              'sent_negatives','Sent_positives')]
+
+daily.shift_1.all.m <- lm((price_dif)~ neutral_tweets ,daily.shift_1.all.d[,c(1:8,49)])
+summary(daily.shift_1.all.m)
+corrplot(cor(daily.shift_1.all.d[,c(1:9,49)]))
+plot(daily.shift_1.all.d[,c(1:8,49)])
+```
+
+```{r}
+data.daily.ts <- xts(data.daily[,-1], order.by=data.daily[,1])
+plot.xts(data.daily.ts, screens = factor(1, 1), auto.legend = TRUE)
+
+
+scale <- 17965
+ggplot() + 
+  geom_line(data = data.daily, aes(x = day, y = Sent_positives), color = "blue") +
+  geom_line(data = data.daily, aes(x = day, y = -sent_negatives), color = "red") +
+  geom_line(data = data.daily, aes(x = day, y = close/scale), color = "black") + 
+  scale_y_continuous(sec.axis = sec_axis(~.*scale, name="Close Price")) +
+  xlab('Dates') 
+```
+
+Before we begin modeling, lets bring in one more field - the total percent each period of time t of positive/negeative tweets/reddit comments as a percent of total tweets/reddit comments.
+
+```{r}
+data.daily <- data.daily %>%
+  mutate(percent_pos_reddit = positive_reddit/total_reddit,
+         percent_neg_reddit = negative_reddit/total_reddit,
+         percent_pos_twitter = positive_tweets/total_tweets,
+         percent_neg_reddit = negative_tweets/total_tweets,)
+```
+
+```{r}
+df <- data.daily
+
+scale <- mean(df$close)/.5
+ggplot() + 
+  geom_line(data = df,
+            aes(x = day, y = percent_pos_reddit, color = "percent_pos_reddit")) +
+  geom_line(data = df,
+            aes(x = day, y = percent_pos_twitter, color = "percent_pos_twitter")) +
+  geom_line(data = df,
+            aes(x = day, y = percent_neg_reddit, color = "percent_neg_reddit")) +
+  geom_line(data = df,
+            aes(x = day, y = close/scale, color = "close")) + 
+  scale_y_continuous(sec.axis = sec_axis(~.*scale, name="Close Price")) +
+  xlab('Dates') +
+  ggtitle('Sentiment Mix vs. Price')
+```
+
+Visually inspecting this, it does not appear that the mix of positive/negative comments/tweets appears to fluctuate in any meaningful way with the price. We expected to see that when price is climing, the percent mix of positive comments/Tweets about bitcoin would also increase. However, this was not the case.
+
+```{r}
+scale <- mean(data.daily$close)/mean(data.daily$total_reddit)
+ggplot() + 
+  geom_line(data = data.daily,
+            aes(x = day, y = total_reddit, color = 'total_reddit')) +
+  geom_line(data = data.daily,
+            aes(x = day, y = positive_reddit, color = 'positive_reddit')) +
+  geom_line(data = data.daily,
+            aes(x = day, y = negative_reddit, color = 'negative_reddit')) +
+  geom_line(data = data.daily,
+            aes(x = day, y = close/scale, color = 'close')) + 
+  scale_y_continuous(sec.axis = sec_axis(~.*scale, name="Close Price")) +
+  xlab('Dates') +
+  ggtitle('Reddit Comments vs. Price')
+
+scale <- mean(data.daily$close)/mean(data.daily$total_tweets)
+ggplot() + 
+  geom_line(data = data.daily,
+            aes(x = day, y = total_tweets, color = 'total_tweets')) +
+  geom_line(data = data.daily,
+            aes(x = day, y = positive_tweets, color = 'positive_tweets')) +
+  geom_line(data = data.daily,
+            aes(x = day, y = negative_tweets, color = 'negative_tweets')) +
+  geom_line(data = data.daily,
+            aes(x = day, y = close/scale, color = 'close')) + 
+  scale_y_continuous(sec.axis = sec_axis(~.*scale, name="Close Price")) +
+  xlab('Dates') +
+  ggtitle('Tweets vs. Price')
+```
+
+```{r}
+
+df <- shift_df(data.daily, 1)[1:nrow(data.daily)-1,]
+
+#scale <- mean(df$total_reddit)/mean(df$price_dif)
+ggplot() + 
+  geom_line(data = df,
+            aes(x = day, y = total_reddit, color = 'total_reddit')) +
+  geom_line(data = df,
+            aes(x = day, y = positive_reddit, color = 'positive_reddit')) +
+  geom_line(data = df,
+            aes(x = day, y = negative_reddit, color = 'negative_reddit')) +
+  geom_line(data = df,
+            aes(x = day, y = price_dif, color = 'price_dif')) + 
+  scale_y_continuous(sec.axis = sec_axis(~.*scale, name="price_dif")) +
+  xlab('Dates') +
+  ggtitle('Reddit Comments vs. Price')
+
+scale <- 100
+ggplot() + 
+  geom_line(data = df,
+            aes(x = day, y = total_tweets, color = 'total_tweets')) +
+  geom_line(data = df,
+            aes(x = day, y = positive_tweets, color = 'positive_tweets')) +
+  geom_line(data = df,
+            aes(x = day, y = negative_tweets, color = 'negative_tweets')) +
+  geom_line(data = df,
+            aes(x = day, y = price_dif*scale, color = 'price_dif')) + 
+  scale_y_continuous(sec.axis = sec_axis(~./scale, name="price_dif")) +
+  xlab('Dates') +
+  ggtitle('Tweets vs. Price')
+```
