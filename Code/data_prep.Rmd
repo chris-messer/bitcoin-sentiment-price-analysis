@@ -126,8 +126,8 @@ str(bitcoin.hourly)
 Now we need to bring in the data around sentiment analysis for Reddit comments.
 
 ```{r}
-reddit.hourly <- read.csv('reddit_agg_by_hour.csv')
-reddit.hourly.subreddit <- read.csv('reddit_agg_by_subreddit_by_hour.csv')
+reddit.hourly <- read.csv('../Data/reddit_agg_by_hour.csv')
+reddit.hourly.subreddit <- read.csv('../Data/reddit_agg_by_subreddit_by_hour.csv')
 
 reddit.hourly$datetime <- ymd_hms(reddit.hourly$datetime)
 reddit.hourly.subreddit$datetime <- ymd_hms(reddit.hourly.subreddit$datetime)
@@ -234,6 +234,22 @@ reddit.hourly.subreddit.top10_melt <- melt(reddit.hourly.subreddit.top10[,-7], i
 reddit.hourly.subreddit.top10_cast <- dcast(reddit.hourly.subreddit.top10_melt, datetime ~ subreddit + variable, value.var = 'value')
 ```
 
+Lastly, lets bring in another column to show the percent of total tweets/Reddit comments that are positive/negative
+
+```{r}
+data.daily <- data.daily %>%
+  mutate(percent_pos_reddit = positive_reddit/total_reddit,
+         percent_neg_reddit = negative_reddit/total_reddit,
+         percent_pos_twitter = positive_tweets/total_tweets,
+         percent_neg_reddit = negative_tweets/total_tweets,)
+
+data.hourly <- data.hourly %>%
+  mutate(percent_pos_reddit = positive_reddit/total_reddit,
+         percent_neg_reddit = negative_reddit/total_reddit,
+         percent_pos_twitter = Count_Positives/Total.Volume.of.Tweets,
+         percent_neg_reddit = Count_Negatives/Total.Volume.of.Tweets)
+```
+
 ## Bringing it all together
 
 Now, we will need to join our data to make a unified dataframe from which to run our regression analyses on.
@@ -255,6 +271,9 @@ data.hourly <- bitcoin.hourly %>%
 
 data.daily <- subset(data.daily, select = -c(X,id,slug,name,symbol,ref_cur,
                 time_open,time_close,time_high,time_low))
+
+write.csv(data.daily, '../Data/data_daily.csv')
+write.csv(data.hourly, '../Data/data_hourly.csv')
 ```
 
 # Data Analysis
