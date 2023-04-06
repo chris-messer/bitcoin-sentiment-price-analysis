@@ -57,6 +57,7 @@ shift_df <- function(df, n){
 
   dfc[order(day), (anscols) := shift(.SD, n, type="lead"), .SDcols=cols]
   dfc <- dfc %>% mutate(price_dif = lead_close - close)
+  dfc <- dfc %>% mutate(price_dif_percent = round((lead_close/close) - 1,4))
   dfc <- dfc %>% mutate(price_dir = ifelse(price_dif >=0, 1,0))
   
 }
@@ -179,7 +180,7 @@ ggplot() +
   xlab('Dates') +
   ggtitle('Reddit Comments vs. Price')
 
-scale <- 100
+scale <- 1000000
 ggplot() + 
   geom_line(data = df,
             aes(x = day, y = total_tweets, color = 'total_tweets')) +
@@ -188,8 +189,8 @@ ggplot() +
   geom_line(data = df,
             aes(x = day, y = negative_tweets, color = 'negative_tweets')) +
   geom_line(data = df,
-            aes(x = day, y = price_dif*scale, color = 'price_dif')) + 
-  scale_y_continuous(sec.axis = sec_axis(~./scale, name="price_dif")) +
+            aes(x = day, y = price_dif_percent*scale, color = 'price_dif_percent')) + 
+  scale_y_continuous(sec.axis = sec_axis(~./scale, name="price_dif_percent")) +
   xlab('Dates') +
   ggtitle('Tweets vs. Price')
 ```
