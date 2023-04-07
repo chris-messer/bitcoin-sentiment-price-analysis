@@ -270,13 +270,13 @@ data.daily <- data.daily %>%
   mutate(percent_pos_reddit = positive_reddit/total_reddit,
          percent_neg_reddit = negative_reddit/total_reddit,
          percent_pos_twitter = positive_tweets/total_tweets,
-         percent_neg_reddit = negative_tweets/total_tweets,)
+         percent_neg_twitter = negative_tweets/total_tweets,)
 
 data.hourly <- data.hourly %>%
   mutate(percent_pos_reddit = positive_reddit/total_reddit,
          percent_neg_reddit = negative_reddit/total_reddit,
          percent_pos_twitter = positive_tweets/total_tweets,
-         percent_neg_reddit = negative_tweets/total_tweets)
+         percent_neg_twitter = negative_tweets/total_tweets)
 
 write.csv(data.daily, '../Data/data_daily.csv')
 write.csv(data.hourly, '../Data/data_hourly.csv')
