@@ -64,6 +64,35 @@ shift_df <- function(df, n){
 
 ```
 
+In addition to shifting the price information, we may want to also shift the sentiment. Why would we want to do this? Because we are going to examine how sentiment impacts the *change in price* against sentiment, how do we know what sentiment means in the context of period *n*? Well, we should probably look at the change of the sentiment from time t-1 to time t, in order to predict the price change from time t to time t +1.
+
+Logically, this would mean *"More people are talking positively about bitcoin today than they were yesterday. Therefore, the price of bitcoin is goin to increase over the next day"*.
+
+```{r}
+shift_df_sent <- function(df, n){
+  dfc <- data.table(copy(df))
+  cols = c('total_tweets',
+           'positive_tweets',
+           'negative_tweets',
+           'total_reddit',
+           'positive_reddit',
+           'negative_reddit')
+  anscols = paste("lag", cols, sep="_")
+  
+  dfc[order(day), (anscols) := shift(.SD, n, type="lag"), .SDcols=cols]
+  for (c in cols){
+    name <- glue('lag_{c}')
+    print(name)
+    print(glue('{name}'))
+    dfc[[name]] <- with(df,round(glue('lag_{name}')/c - 1,4))
+  }
+  
+}
+
+t <- shift_df_sent(data.daily, 3)
+
+```
+
 Now, let's build a "kitchen sink model" where we use all of the predictors to predict the price movement.
 
 ```{r}
@@ -97,7 +126,6 @@ scale <- 17965
 ggplot() + 
   geom_line(data = data.daily, aes(x = day, y = Sent_positives), color = "blue") +
   geom_line(data = data.daily, aes(x = day, y = -sent_negatives), color = "red") +
-  geom_line(data = data.daily, aes(x = day, y = close/scale), color = "black") + 
   scale_y_continuous(sec.axis = sec_axis(~.*scale, name="Close Price")) +
   xlab('Dates') 
 ```
@@ -129,8 +157,8 @@ ggplot() +
             aes(x = day, y = percent_pos_twitter, color = "percent_pos_twitter")) +
   geom_line(data = df,
             aes(x = day, y = percent_neg_reddit, color = "percent_neg_reddit")) +
-  geom_line(data = df,
-            aes(x = day, y = close/scale, color = "close")) + 
+  #geom_line(data = df,
+   #         aes(x = day, y = close/scale, color = "close")) + 
   scale_y_continuous(sec.axis = sec_axis(~.*scale, name="Close Price")) +
   xlab('Dates') +
   ggtitle('Sentiment Mix vs. Price')
@@ -172,7 +200,7 @@ ggplot() +
 
 df <- shift_df(data.daily, 1)[1:nrow(data.daily)-1,]
 
-#scale <- mean(df$total_reddit)/mean(df$price_dif)
+scale <- 100000
 ggplot() + 
   geom_line(data = df,
             aes(x = day, y = total_reddit, color = 'total_reddit')) +
@@ -181,8 +209,8 @@ ggplot() +
   geom_line(data = df,
             aes(x = day, y = negative_reddit, color = 'negative_reddit')) +
   geom_line(data = df,
-            aes(x = day, y = price_dif, color = 'price_dif')) + 
-  scale_y_continuous(sec.axis = sec_axis(~.*scale, name="price_dif")) +
+            aes(x = day, y = price_dif_percent*scale, color = 'price_dif_percent')) + 
+  scale_y_continuous(sec.axis = sec_axis(~./scale, name="price_dif_percent")) +
   xlab('Dates') +
   ggtitle('Reddit Comments vs. Price')
 
