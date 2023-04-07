@@ -72,7 +72,7 @@ head(twitter.daily)
 ```{r}
 #rename some columns for consistency
 names(twitter.hourly)[names(twitter.hourly) == 'Total.Volume.of.Tweets'] <- 'total_tweets'
-names(twitter.hourly)[names(twitter.hourly) == 'Count_Positive'] <- 'positive_tweets'
+names(twitter.hourly)[names(twitter.hourly) == 'Count_Positives'] <- 'positive_tweets'
 names(twitter.hourly)[names(twitter.hourly) == 'Count_Negatives'] <- 'negative_tweets'
 
 ```
