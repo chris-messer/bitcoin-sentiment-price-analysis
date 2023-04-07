@@ -59,33 +59,11 @@ shift_df <- function(df, n){
   dfc <- dfc %>% mutate(price_dif = lead_close - close)
   dfc <- dfc %>% mutate(price_dif_percent = round((lead_close/close) - 1,4))
   dfc <- dfc %>% mutate(price_dir = ifelse(price_dif >=0, 1,0))
+  dfc <- dfc[1:(nrow(dfc)-n),]
+  dfc
   
 }
 
-```
-
-Now, let's build a "kitchen sink model" where we use all of the predictors to predict the price movement.
-
-```{r}
-#set the lag/lead
-#n <- 7
-
-#shift the close amount n periods forwards
-#daily.shift_1.all.d <- shift_df(data.daily, n)
-
-#revome columns we want to exclude from analysis. Primarily, we are excluding the columns that are related to bitcoin price. Because we want to isolate the pricing movement and the sentiment that could have caused them, we do not want to include any of the pricing information that could give us a false confirmation that we have a model that predicts pricing movements, as it may only be predicting based on the input price information.
-
-#Note we also remove sent positive/negative, as these are aggregated scores at the daily/hourly level
-#daily.shift_1.all.d <- daily.shift_1.all.d[1:(ncol(daily.shift_1.all.d)-1),
-                                           #!c('open','high','low',
-                                            #  'close','price_dir','day',
-                                             # 'volume','market_cap','lead_close',
-                                              #'sent_negatives','Sent_positives')]
-
-#daily.shift_1.all.m <- lm((price_dif)~ neutral_tweets ,daily.shift_1.all.d[,c(1:8,49)])
-#summary(daily.shift_1.all.m)
-#corrplot(cor(daily.shift_1.all.d[,c(1:9,49)]))
-#plot(daily.shift_1.all.d[,c(1:8,49)])
 ```
 
 # Plotting some data
@@ -119,12 +97,12 @@ plot_scaled_data <- function(df, y_cols, x_col, title, t){
 ## Sentiment Rating (Tweets) vs. Price
 
 ```{r}
-cols <- c('Sent_Positives',
-          "Sent_Negatives",
+cols <- c('Sent_positives',
+          "sent_negatives",
           'close'
           )
 data.daily$day <- ymd(data.daily$day)
-plot_scaled_data(data.frame(df), cols, 'day', 'Sent Rating vs. Price', 'line')
+plot_scaled_data(data.daily, cols, 'day', 'Sent Rating vs. Price', 'line')
 #data.daily[,cols]
 ```
 
@@ -157,18 +135,19 @@ Visually inspecting this, it does not appear that the mix of positive/negative c
 ## \# of Comments/Tweets vs. Price
 
 ```{r}
+
+df <- data.daily
 cols <- c('total_reddit',
           "positive_reddit",
           'negative_reddit',
           'close')
-plot_scaled_data(data.daily, cols, 'day', 'Reddit Comments vs. Price (Scaled, Daily)', 'line')
+plot_scaled_data(df, cols, 'day', 'Reddit Comments vs. Price (Scaled, Daily)', 'line')
 
 cols <- c('total_tweets',
           "positive_tweets",
           'negative_tweets',
           'close')
-plot_scaled_data(data.daily, cols, 'day', 'Tweets vs. Price (Scaled, Daily)', 'line')
-
+plot_scaled_data(df, cols, 'day', 'Tweets vs. Price (Scaled, Daily)', 'line')
 
 
 df <- data.hourly
@@ -186,7 +165,33 @@ cols <- c('total_tweets',
 plot_scaled_data(df, cols, 'datetime', 'Tweets vs. Price (Scaled, Hourly)', 'line')
 ```
 
-## '\# of Comments/Tweets vs. Price Changes
+These charts are particularly interesting, it seems that the total number of tweets and comments, regardless of whether they are positive or negative, seems to very closely track the price of bitcoin. Let's plot the total tweet/comment activity against the price of bitcoin on each day/hour and see if there appears to be any correlation.
+
+```{r}
+df <- data.daily
+cols <- c('total_reddit',
+          "positive_reddit",
+          'negative_reddit',
+          'total_tweets',
+          "positive_tweets",
+          'negative_tweets'
+          )
+plot_scaled_data(df, cols, 'close', 'Reddit Comments vs. Price (Scaled, Daily)', 'scatter')
+
+df <- data.hourly
+cols <- c('total_reddit',
+          "positive_reddit",
+          'negative_reddit',
+          'total_tweets',
+          "positive_tweets",
+          'negative_tweets'
+          )
+plot_scaled_data(df, cols, 'close', 'Reddit Comments vs. Price (Scaled, Daily)', 'scatter')
+```
+
+There seems to be a very noticeable correlation between the converation activity and the price of Bitcoin. We will want to explore this in our regression analysis.
+
+## \# of Comments/Tweets vs. Price Changes
 
 Because we are now looking at changes in the price from time t-1 to time t, we will use a scatter plot rather than a line graph. That is because our data is no longer a time series, i.e. the price change in one period is independent of the price change in the previous.
 

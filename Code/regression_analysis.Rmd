@@ -1,0 +1,183 @@
+---
+title: "regression_analysis"
+output: html_document
+date: "2023-04-07"
+---
+
+# Regression Analaysis
+
+## Data Prep
+
+First, lets bring in some packages.
+
+```{r}
+library(corrplot)
+library(xts)
+library(vctrs)
+library(rlang)
+library(kernlab)
+library(crypto2)
+library('lubridate')
+library('dplyr')
+library(reshape2)
+library(glue)
+library(qcc)
+library(tidyverse)
+library(data.table)
+library(ggplot2)
+library(DAAG)
+```
+
+Now bring in the data:
+
+```{r}
+data.daily <- read.csv('../Data/data_daily.csv')[,-1]
+data.hourly <- read.csv('../Data/data_hourly.csv')[,-1]
+```
+
+Next, lets drop the rows that have no information in the close column (due to the missing price data in the twitter input data. This was addressed in the data prep Rmd file.)
+
+```{r}
+
+data.hourly <-data.hourly[is.na(data.hourly$close) == F,]
+
+data.hourly$datetime <- ymd_hms(data.hourly$datetime)
+data.hourly$day <- ymd(data.hourly$day)
+
+data.daily$day <- ymd(data.daily$day)
+```
+
+Next, as we did in our data exploration workbook, lets create a function that allows us to shift the close price *forward* n periods. That way, when we look at one row of data, we can say that the comment/tweet activity at time *t-n* is being compared against the closing price at time *t*.
+
+```{r}
+shift_df <- function(df, n){
+  dfc <- data.table(copy(df))
+  cols = c("close")
+  anscols = paste("lead", cols, sep="_")
+
+  dfc[order(day), (anscols) := shift(.SD, n, type="lead"), .SDcols=cols]
+  dfc <- dfc %>% mutate(price_dif = lead_close - close)
+  dfc <- dfc %>% mutate(price_dif_percent = round((lead_close/close) - 1,4))
+  dfc <- dfc %>% mutate(price_dir = ifelse(price_dif >=0, 1,0))
+  dfc <- dfc[1:(nrow(dfc)-n),]
+  dfc
+  
+}
+
+```
+
+## Validation
+
+We will want to validate our models to ensure they are not being over fit. We will use the DAAG package.
+
+```{r}
+cross_validate <- function(df, model, response_var){
+  
+      
+    m.cv <- cv.lm(df, model, m=5, seed=10, printit=F, plotit =F)
+    
+    SSres <- attr(m.cv,"ms")*nrow(df)
+    SStotal <- sum((df[[response_var]] - mean(df[[response_var]]))^2)
+    rs <- 1- SSres/SStotal
+    rs
+  
+}
+```
+
+## Model Building
+
+Since we are going to want to test different lag/lead times to see if there is any difference in model performance, lets build another function that takes in:
+
+-   The initial data frame (daily/hourly)
+
+-   A formula
+
+-   A list of intervals we want to test
+
+This function will return a dataframe with one column being the interval tested and the other being the cross-validated r^2^ value.
+
+```{r}
+run_intervals <- function(df, form, response_var,N){
+  
+  for (n in N){
+    mdf <- shift_df(df, n)
+    m <- lm(formula(form), mdf)
+    
+    print(n)
+    print(cross_validate(mdf, m, response_var))
+  }
+  
+}
+
+```
+
+Lets build another function that can help reduce variable in the model. This function will take in a model and a maximum p value, and return a new formula object with only the variable with p values from the inputed model that are below the filter value.
+
+```{r}
+write_formula <- function(lm_model, pvalue_filter) {
+        coeff <- data.frame(pvalue = (summary(lm_model)$coefficients)[-1,4])
+        
+        response_var <- summary(lm_model)$call$formula[[2]]
+        
+        formula <- (paste(glue("{response_var} ~ "), paste(rownames(filter(coeff, pvalue < pvalue_filter)), collapse = " + "))
+        )
+return(formula)
+}
+```
+
+```{r}
+run_intervals(data.daily,
+              form = 'lead_close ~ 
+                       total_reddit +
+                       positive_reddit + 
+                       negative_reddit + 
+                       total_tweets +
+                       positive_tweets +
+                       negative_tweets',
+              response_var = 'lead_close',
+              N = c(1,7,14,21))
+
+```
+
+```{r}
+df <- shift_df(data.daily, 14)
+
+m1 <- lm(scale(lead_close) ~ 
+           scale(close) + 
+           scale(total_reddit) +
+           scale(positive_reddit) + 
+           scale(negative_reddit) + 
+           scale(total_tweets) +
+           scale(positive_tweets) +
+           scale(negative_tweets), data = df)
+
+summary(m1)
+
+#m2 <- lm(write_formula(m1, .05), df)
+#summary(m2)
+#plot(m2)
+cross_validate(df, m1, 'lead_close')
+```
+
+```{r}
+set.seed(1)
+
+
+
+m2 <- lm(lead_close ~ 
+           #close + 
+           (total_reddit*close) +
+           positive_reddit*close + 
+           negative_reddit*close + 
+           total_tweets*close +
+           positive_tweets*close +
+           negative_tweets*close, data = df)
+
+
+
+m3<- lm(write_formula(m2, .05), df)
+
+summary(m2)
+
+cross_validate(df, m2, 'lead_close')
+```
