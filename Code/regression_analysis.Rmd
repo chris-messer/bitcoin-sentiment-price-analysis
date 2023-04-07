@@ -110,6 +110,12 @@ data.daily <- data.daily %>%
          percent_neg_reddit = negative_reddit/total_reddit,
          percent_pos_twitter = positive_tweets/total_tweets,
          percent_neg_reddit = negative_tweets/total_tweets,)
+
+data.hourly <- data.hourly %>%
+  mutate(percent_pos_reddit = positive_reddit/total_reddit,
+         percent_neg_reddit = negative_reddit/total_reddit,
+         percent_pos_twitter = positive_tweets/total_tweets,
+         percent_neg_reddit = negative_tweets/total_tweets,)
 ```
 
 ```{r}
