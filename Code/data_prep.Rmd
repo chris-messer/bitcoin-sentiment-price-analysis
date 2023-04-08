@@ -74,7 +74,7 @@ head(twitter.daily)
 names(twitter.hourly)[names(twitter.hourly) == 'Total.Volume.of.Tweets'] <- 'total_tweets'
 names(twitter.hourly)[names(twitter.hourly) == 'Count_Positives'] <- 'positive_tweets'
 names(twitter.hourly)[names(twitter.hourly) == 'Count_Negatives'] <- 'negative_tweets'
-
+names(twitter.hourly)[names(twitter.hourly) == 'Count_Neutrals'] <- 'neutral_tweets'
 ```
 
 ## Bitcoin Data
@@ -280,44 +280,4 @@ data.hourly <- data.hourly %>%
 
 write.csv(data.daily, '../Data/data_daily.csv')
 write.csv(data.hourly, '../Data/data_hourly.csv')
-```
-
-# Data Analysis
-
-As part of our analysis, we want to try different time-shifting intervals. i.e. does the price of bitcoin at time *t* depend on the sentiment at time *t-n* where n is the number of period back we shift. To faciliate this, we will write a function that takes in a dataframe, and shifts the closing price of bitcoin forward *n* periods, and returns a new data frame.
-
-```{r}
-all_vals.daily <- (names = colnames(data.daily))
-no_shift.daily <- c("day","close")
-shift_vals.daily <- all_vals.daily[! all_vals.daily %in% no_shift.daily]
-DT = data.table(year=2010:2014, v1=runif(5), v2=1:5, v3=letters[1:5])
-DT2 = copy(DT)
-cols = c("v2","v3")
-
-DT2[order(year), (cols) := shift(.SD, 2, type="lag"), .SDcols=cols]
-DT2[order(year)]
-DT
-
-```
-
-```{r}
-shift_df <- function(df, n){
-  dfc <- data.table(copy(df))
-  cols = c("close")
-
-  dfc[order(day), (cols) := shift(.SD, n, type="lag"), .SDcols=cols]
-  dfc
-}
-t2 <- data.hourly[is.na(data.hourly$close) == F,]
-t <- shift_df(na.omit(data.hourly,close),1)
-head(t)
-```
-
-Now, when we regress on a row of data, we are finding the coefficients -- that when multiplied by the independent variable values - equal to the bitcoin closing price *n* periods ahead.
-
-```{r}
-n <- 4
-lm.data <- shift_df(t2, n)[n+1:nrow(t2),c(3,6:52)]
-m1 <- lm(close~ Bitcoin_negative_reddit + open,na.omit(lm.data))
-summary(m1)
 ```
