@@ -4,9 +4,7 @@ output: html_document
 date: "2023-04-07"
 ---
 
-# Regression Analaysis
-
-## Data Prep
+# Data Prep
 
 First, lets bring in some packages.
 
@@ -26,6 +24,11 @@ library(tidyverse)
 library(data.table)
 library(ggplot2)
 library(DAAG)
+library(caTools)
+
+library(quantmod)
+library(MASS)
+library(corrplot)
 ```
 
 Now bring in the data:
@@ -66,25 +69,7 @@ shift_df <- function(df, n){
 
 ```
 
-## Validation
-
-We will want to validate our models to ensure they are not being over fit. We will use the DAAG package.
-
-```{r}
-cross_validate <- function(df, model, response_var){
-  
-      
-    m.cv <- cv.lm(df, model, m=5, seed=10, printit=F, plotit =F)
-    
-    SSres <- attr(m.cv,"ms")*nrow(df)
-    SStotal <- sum((df[[response_var]] - mean(df[[response_var]]))^2)
-    rs <- 1- SSres/SStotal
-    rs
-  
-}
-```
-
-## Model Building
+# Helper Functions
 
 Since we are going to want to test different lag/lead times to see if there is any difference in model performance, lets build another function that takes in:
 
@@ -139,45 +124,203 @@ run_intervals(data.daily,
 
 ```
 
+# Linear Regression Models
+
+For our first model, we are going to look at only the features that we saw were strongly correlated with the price movements of Bitcoin.
+
 ```{r}
-df <- shift_df(data.daily, 14)
+df.daily <- shift_df(data.daily, 1)[,c('lead_close',
+           #'close',  
+           'total_reddit', 
+           'positive_reddit', 
+           'neutral_reddit',
+           'negative_reddit',  
+           'total_tweets', 
+           'positive_tweets', 
+           'neutral_tweets',
+           'negative_tweets')]
 
-m1 <- lm(scale(lead_close) ~ 
-           scale(close) + 
-           scale(total_reddit) +
-           scale(positive_reddit) + 
-           scale(negative_reddit) + 
-           scale(total_tweets) +
-           scale(positive_tweets) +
-           scale(negative_tweets), data = df)
+daily.lin_lin <- lm(lead_close ~ ., data = df.daily)
+summary(daily.lin_lin)
 
-summary(m1)
-
-#m2 <- lm(write_formula(m1, .05), df)
-#summary(m2)
-#plot(m2)
-cross_validate(df, m1, 'lead_close')
 ```
 
+Our first model performed rather well - we can see here that .61% of the variance in bitcoin price is explained by how much people are talking about Bitcoin across reddit and Twitter the day before. However, there are a few things that we need to consider before taking that at face value. First, we need to cross validate that model and ensure it was not overfit. We will do that now. We'll build a function we can reuse on other lin-lin models.
+
 ```{r}
-set.seed(1)
+cross_validate <- function(df, model){
+  
+      
+    m.cv <- cv.lm(df, model, m=5, seed=10, printit=F, plotit =F)
+    
+    response_var <- summary(model)$call$formula[[2]]
+    SSres <- attr(m.cv,"ms")*nrow(df)
+    SStotal <- sum((df[[response_var]] - mean(df[[response_var]]))^2)
+    rs <- 1- SSres/SStotal
+    rs
+  
+}
+
+cross_validate(df.daily, daily.lin_lin)
+
+
+```
+
+Looks like we get a warning here. Some quick research tells us that this error is telling us one of two things. Either A.) Two predictor variables are perfectly correlated or B.) You have more model parameters than observations in the dataset.
+
+Since we have 500 + rows and only 7 predictors, we can count out B. That leaves A.
+
+Our model above failed to consider the assumptions of a linear model. These are: 		
+
+1.  Collinearity
+
+2.  Non-linearity of the response-predictor relationships
+
+3.  Correlation of error terms
+
+4.  Non-constant variance of error terms
+
+5.  Outliers
+
+6.  High-leverage points
+
+We will address each of these as we move through this documentation.
+
+## Collinearity
+
+The first assumption we will address is collinearity. That is, the assumption that our predictor variables are correlated to one another. Intuitively, we can assume that they are correlated. The features we are using are the total tweets which is just the total of the positive, negative, and neutral tweets, and for Reddit, the total comments This is why our cross validated model through the error:
+
+    Warning: prediction from a rank-deficient fit may be misleading
+
+Lets investigate this a little. First, we will
+
+```{r}
+plot(df.daily)
+```
+
+Visually inspecting this, we can see that multicolinearity is very strong across all of our predictor variables. We can confrim this using variance inflation factors.
+
+```{r}
+vif(daily.lin_lin)
+```
+
+All of these have significant VIF values (above \~5). Lets first attempt to just remove the total columns, as they are just a combination of the others.
+
+```{r}
+df.daily <- shift_df(data.daily, 1)[,c('lead_close',
+           'positive_reddit', 
+           'neutral_reddit',
+           'negative_reddit',
+           'positive_tweets', 
+           'neutral_tweets',
+           'negative_tweets')]
+
+daily.lin_lin <- lm(lead_close ~ ., data = df.daily)
+summary(daily.lin_lin)
+vif(daily.lin_lin)
+```
+
+Here we get an r^2^ of .6, but our VIF's are still large. Looking at the summary, only "negative tweets" has an obviously lower p value, so there's not one clear feature we would want to retain.
+
+We have a couple of options here.
+
+1.  Keep only one term, at random
+
+2.  Add interaction terms
+
+3.  Principal Component Analysis
+
+In this exploration, we will try the latter two.
+
+### Interaction Term
+
+For our interaction term, we will use the volume traded at period *t-n*. Logically, the amount price moves may be tied to not just how much people are talking about bitcoin, but also how is being traded. For example, people may be talking very negatively about bitcoin at a given moment, but what if no one is trading on this information?
+
+```{r}
+
+df.daily <- df.daily <- shift_df(data.daily, 1)[,c('lead_close',
+           'volume',                                       
+           'positive_reddit', 
+           'neutral_reddit',
+           'negative_reddit',
+           'positive_tweets', 
+           'neutral_tweets',
+           'negative_tweets')]
+
+ daily.lin_lin.m2 <- lm(lead_close ~ 
+                         positive_reddit*volume + 
+                         negative_reddit*volume + 
+                         neutral_reddit*volume  +
+                         positive_tweets*volume +
+                         neutral_reddit*volume + 
+                         negative_tweets*volume, data = df.daily)
+ summary(daily.lin_lin.m2)
+ vif(daily.lin_lin.m2)
+
+```
+
+Once again, while we have a very high R^2^ value, we also have very high VIF values still. As such, adding the closing price as an interaction term does not appear to have given us a better model.
+
+### Principal Component Analysis
+
+Now, we will instead try to reduce the number of variables by using prinicipal component analysis. This will take all of our features, make a linear combination of them, and give us a new set of features. Because we can now use a very large number of correlated variables, we will also bring in the dis-aggregated subreddit sentiment values. i.e rather than looking at just the total comments, we will look at the communities those comments were made in.
+
+**Note:** PCA is outside of the scope of this assignment, so no further explanation will be delivered.
+
+```{r}
+# build a df with all columns, exluding the columns discussed above like total_comments, and the columns relating to bitcoin price. 
+df.daily.all <- shift_df(data.daily, 1)[,!c('day','open','high','close','high',
+                                 'low','total_tweets','total_reddit','market_cap',
+                                 'sent_negatives','Sent_positives',
+                                 'percent_pos_reddit','percent_neg_reddit',
+                                 'percent_pos_twitter', 'price_dif',
+                                 'price_dif_percent','price_dir')]
+#replace na's with 0
+df.daily.all <- mutate_all(df.daily.all, ~replace_na(.,0))
+
+#perform PCA
+df.daily.all.pca <- prcomp(~.,df.daily.all[,!'lead_close'], scale = TRUE)
 
 
 
-m2 <- lm(lead_close ~ 
-           #close + 
-           (total_reddit*close) +
-           positive_reddit*close + 
-           negative_reddit*close + 
-           total_tweets*close +
-           positive_tweets*close +
-           negative_tweets*close, data = df)
+#scree plot
+pca.var.per <- round(summary(df.daily.all.pca)$importance[2,]*100,1)
+barplot(pca.var.per[1:25],
+         main ="Scree Plot",
+         xlab= "Principal Component",
+         ylab = "Percent Variation")
+```
 
+Looking at the above scree plot, the first 3 principal components account for around 80% of the total variance. Lets build a linear model using different numbers of principal components to confirm this.
 
+```{r}
+r2 <- c()
 
-m3<- lm(write_formula(m2, .05), df)
+for (i in 1:20){
+   linear_data <- as.data.frame(cbind(df.daily.all.pca$x[,1:i],
+                                      df.daily.all[,'lead_close']))
+   
+   pca.model <- lm(lead_close~.,data = linear_data)
+   r2[i] <- summary(pca.model)$r.squared
+}
+plot(r2)
+```
 
-summary(m2)
+After looking at the resulting models, it appears that using 7 principal components actually gives us the strongest model, with diminishing returns after that. As such, we will build a model with 7 PCs and then evaluate the other assumptions.
 
-cross_validate(df, m2, 'lead_close')
+```{r}
+df.daily.all.pca.seven <- as.data.frame(cbind(df.daily.all.pca$x[,1:7],
+                                      df.daily.all[,'lead_close']))
+   
+daily.lin_lin.pca <- lm(lead_close~. ,
+                        data = df.daily.all.pca.seven)
+
+summary(daily.lin_lin.pca)
+vif(daily.lin_lin.pca)
+```
+
+Now, we have a model with a r^2^ of .71, and all VIF are below 5, indicating no multicollinearity! Only thing left to do now is to cross validate the model:
+
+```{r}
+cross_validate()
 ```
