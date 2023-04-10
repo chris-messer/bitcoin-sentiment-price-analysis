@@ -50,6 +50,8 @@ data.hourly$day <- ymd(data.hourly$day)
 data.daily$day <- ymd(data.daily$day)
 ```
 
+# Helper Functions
+
 Next, as we did in our data exploration workbook, lets create a function that allows us to shift the close price *forward* n periods. That way, when we look at one row of data, we can say that the comment/tweet activity at time *t-n* is being compared against the closing price at time *t*.
 
 ```{r}
@@ -67,9 +69,31 @@ shift_df <- function(df, n){
   
 }
 
+
 ```
 
-# Helper Functions
+Now, we want to also aggregate hour independent data points back *d* amount of days. This allows us to answer the following: How does the sentiment over the last *d* days/hours impact the price of Bitcoin *n* days/hours from now?
+
+Lets write another function that can do this transformation for us.
+
+```{r}
+agg_lag_df <- function(df, d){
+  
+  cols <- colnames(df)
+  cols <- cols[! cols %in% c('close','lead_close')]
+  e <- nrow(df)
+  print(e)
+  for (c in cols){
+  vname <- glue('{c}')
+    df <- df %>% 
+      
+        mutate( !!vname := roll_sum(.data[[c]], d, align = "right", fill = NA))
+  }       
+
+  df <- df[d + 1:(e-d),]
+  df
+}
+```
 
 Since we are going to want to test different lag/lead times to see if there is any difference in model performance, lets build another function that takes in:
 
@@ -93,24 +117,6 @@ run_intervals <- function(df, form, N, response_var){
   }
   
 }
-
-```
-
-Lets build another function that can help reduce variable in the model. This function will take in a model and a maximum p value, and return a new formula object with only the variable with p values from the inputed model that are below the filter value.
-
-```{r}
-write_formula <- function(lm_model, pvalue_filter) {
-        coeff <- data.frame(pvalue = (summary(lm_model)$coefficients)[-1,4])
-        
-        response_var <- summary(lm_model)$call$formula[[2]]
-        
-        formula <- (paste(glue("{response_var} ~ "), paste(rownames(filter(coeff, pvalue < pvalue_filter)), collapse = " + "))
-        )
-return(formula)
-}
-```
-
-```{r}
 
 ```
 
@@ -150,14 +156,14 @@ df.daily <- shift_df(data.daily, 1)[,c('lead_close',
            'total_tweets', 
            'positive_tweets', 
            'neutral_tweets',
-           'negative_tweets')]
+           'negative_tweets')] %>% agg_lag_df(7)
 
 daily.lin_lin <- lm(lead_close ~ ., data = df.daily)
 summary(daily.lin_lin)
 
 ```
 
-Our first model performed rather well - we can see here that .61% of the variance in bitcoin price is explained by how much people are talking about Bitcoin across reddit and Twitter the day before. However, there are a few things that we need to consider before taking that at face value. First, we need to cross validate that model and ensure it was not overfit. We will do that now. We'll build a function we can reuse on other lin-lin models.
+Our first model performed rather well - we can see here that .89% of the variance in bitcoin price is explained by how much people are talking about Bitcoin across reddit and Twitter the 7 days before. However, there are a few things that we need to consider before taking that at face value. First, we need to cross validate that model and ensure it was not overfit. We will do that now. We'll build a function we can reuse on other lin-lin models.
 
 ```{r}
 cross_validate <- function(df, model){
@@ -203,7 +209,7 @@ df.daily <- shift_df(data.daily, 1)[,c('lead_close',
            'negative_reddit',
            'positive_tweets', 
            'neutral_tweets',
-           'negative_tweets')]
+           'negative_tweets')] %>% agg_lag_df(7)
 
 daily.lin_lin <- lm(lead_close ~ ., data = df.daily)
 summary(daily.lin_lin)
@@ -237,7 +243,7 @@ df.daily <- df.daily <- shift_df(data.daily, 1)[,c('lead_close',
            'negative_reddit',
            'positive_tweets', 
            'neutral_tweets',
-           'negative_tweets')]
+           'negative_tweets')] %>% agg_lag_df(7)
 
  daily.lin_lin.m2 <- lm(lead_close ~ 
                          positive_reddit*volume + 
@@ -276,7 +282,8 @@ df.daily.all <- shift_df(data.daily, 1)[,c('lead_close',
            'negative_reddit',
            'positive_tweets', 
            'neutral_tweets',
-           'negative_tweets')]
+           'negative_tweets')]  %>% agg_lag_df(7)
+
 
 #replace na's with 0
 df.daily.all <- mutate_all(df.daily.all, ~replace_na(.,0))
@@ -289,24 +296,9 @@ df.daily.all.pca <- prcomp(~.,df.daily.all[,!'lead_close'], scale = TRUE)
 #scree plot
 pca.var.per <- round(summary(df.daily.all.pca)$importance[2,]*100,1)
 barplot(pca.var.per,
-         main ="Scree Plot",
+         main ="Scree Plot (Daily)",
          xlab= "Principal Component",
          ylab = "Percent Variation")
-```
-
-Looking at the above scree plot, the first 3 principal components account for around 80% of the total variance. Lets build a linear model using different numbers of principal components to confirm this.
-
-```{r}
-r2 <- c()
-
-for (i in 1:7){
-   linear_data <- as.data.frame(cbind(df.daily.all.pca$x[,1:i],
-                                      df.daily.all[,'lead_close']))
-   
-   pca.model <- lm(lead_close~.,data = linear_data)
-   r2[i] <- summary(pca.model)$r.squared
-}
-plot(r2)
 ```
 
 After looking at the resulting models, it appears that using 3 principal components actually gives us the strongest model, with diminishing returns after that. As such, we will build a model with 3 PCs and then evaluate the other assumptions.
@@ -319,7 +311,10 @@ daily.lin_lin.pca <- lm(lead_close~. ,
                         data = df.daily.all.pca.3)
 
 summary(daily.lin_lin.pca)
+print('VIF:')
 vif(daily.lin_lin.pca)
+cross_validate(df.daily.all.pca.3,daily.lin_lin.pca)
+plot(daily.lin_lin.pca)
 ```
 
 Now, we have a model with a r^2^ of .71, and all VIF are below 5, indicating no multicollinearity! Only thing left to do now is to cross validate the model:
@@ -362,7 +357,15 @@ In addition to heteroskedacity, we also want to check and see if our residuals a
 plot(daily.lin_lin.pca, which=c(2, 3))
 ```
 
-Here we can see some skewness it the residuals, and they are not spread equally. This is a major case against our model. While it performs well when looking at r^2^ value, it only is performing well when the leading close price (the period we are trying to predict) is near the mean. Looking at the timeline of the bitcoin price, only a small hump is visible. This tells us that the features are only predicting when price is not moving much, thus, it is not a very useful model.
+Here we can see there is not too much skewness in our residuals, meaning our model is performing well across our entire dataset. We do see some skewness emerge towards the right of the Q-Q plot, however, it only appears to be a few points, and thus may be cause by outliers. Otherwise, the residuals have a pseudo normal distribution.
+
+#### Outliers and High Leverage Points
+
+```{r}
+plot(daily.lin_lin.pca, which=c(4, 5))
+```
+
+Lastly, we look at outliers and leverage. On the first chart, we have two points that seem to be outliers, as their cooks distance is greater than .5. We note that one of the points, 121, is the same point on the Q-Q plot that fell outside of a normall distributed range for residuals. However, looking at the leverage plot, there are no points that appear to be high leverage outliers. This means we could likely remove these points and not have much of an impact on the model. Thus, we conclude that the points are outliers, but are not impacting the overall model and do not need to be removed.
 
 ## Simple linear Model- Less Variables
 
@@ -372,12 +375,14 @@ In this model, we will attempt a very simple model, removing most of the variabl
 df.daily.all <- shift_df(data.daily, 1)[,c('lead_close',
            'volume',                                       
            'total_reddit',
-           'total_tweets')]
-total_models <- lm(log(lead_close) ~ log(volume) +total_reddit+ total_tweets, df.daily.all)
+           'total_tweets')] %>% agg_lag_df(7)
+total_models <- lm((lead_close) ~ (volume) +total_reddit+ total_tweets, df.daily.all)
 vif(total_models)
 summary(total_models)
 plot(total_models)
 ```
+
+Here, we see the VIF
 
 # Hourly Models
 
@@ -387,17 +392,19 @@ In this section, we will perform the same models as above but using the hourly d
 
 ```{r}
 
+df.hourly <- mutate_all(data.hourly, ~replace_na(.,0))
+
 df.hourly <- shift_df(data.hourly, 1)[,c('lead_close',
            'positive_reddit', 
            'neutral_reddit',
            'negative_reddit',
            'positive_tweets', 
            'neutral_tweets',
-           'negative_tweets')]
+           'negative_tweets')] %>% agg_lag_df(6)
 
 hourly.lin_lin <- lm(lead_close ~ ., data = df.hourly)
 summary(hourly.lin_lin)
-cross_validate(df.hourly,hourly.lin_lin)
+cross_validate(df.hourly, hourly.lin_lin)
 vif(hourly.lin_lin)
 plot(hourly.lin_lin)
 ```
@@ -414,7 +421,7 @@ df.hourly <- shift_df(data.hourly, 1)[,c('lead_close',
            'negative_reddit',
            'positive_tweets', 
            'neutral_tweets',
-           'negative_tweets')]
+           'negative_tweets')] %>% agg_lag_df(6)
 
 hourly.lin_lin <- lm(lead_close ~ 
                          positive_reddit*volume + 
@@ -423,9 +430,9 @@ hourly.lin_lin <- lm(lead_close ~
                          positive_tweets*volume +
                          neutral_reddit*volume + 
                          negative_tweets*volume, data = df.hourly)
- summary(daily.lin_lin)
- vif(daily.lin_lin)
- plot(daily.lin_lin)
+ summary(hourly.lin_lin)
+ vif(hourly.lin_lin)
+ plot(hourly.lin_lin)
  
 
 ```
@@ -441,7 +448,7 @@ df.hourly.all <- shift_df(data.hourly, 1)[,c('lead_close',
            'negative_reddit',
            'positive_tweets', 
            'neutral_tweets',
-           'negative_tweets')]
+           'negative_tweets')] %>% agg_lag_df(6)
 
 #replace na's with 0
 df.hourly.all <- mutate_all(df.hourly.all, ~replace_na(.,0))
@@ -460,17 +467,6 @@ barplot(pca.var.per,
 ```
 
 ```{r}
-for (i in 1:7){
-   linear_data <- as.data.frame(cbind(df.hourly.all.pca$x[,1:i],
-                                      df.hourly.all[,'lead_close']))
-   
-   pca.model <- lm(lead_close~.,data = linear_data)
-   r2[i] <- summary(pca.model)$r.squared
-}
-plot(r2)
-```
-
-```{r}
 df.daily.all.pca.5 <- as.data.frame(cbind(df.daily.all.pca$x[,1:5],
                                       df.daily.all[,'lead_close']))
    
@@ -485,10 +481,10 @@ plot(daily.lin_lin.pca)
 ## Simple Model - Less Variables
 
 ```{r}
-df.hourly.all <- shift_df(data.hourly, 2)[,c('lead_close',
+df.hourly.all <- shift_df(data.hourly, 1)[,c('lead_close',
            'volume',                                       
            'total_reddit',
-           'total_tweets')]
+           'total_tweets')] %>% agg_lag_df(6)
 total_models <- lm(log(lead_close) ~ (volume) +total_reddit+ total_tweets,
                    df.hourly.all)
 vif(total_models)
@@ -516,5 +512,9 @@ intervals <- run_intervals(data.daily,
               form = 'log(lead_close) ~ volume +total_reddit+ total_tweets',
               N = c(1,12,18,24))
 
+
+```
+
+```{r}
 
 ```

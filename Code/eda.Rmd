@@ -66,6 +66,29 @@ shift_df <- function(df, n){
 
 ```
 
+Now, we want to also aggregate hour independent data points back *d* amount of days. This allows us to answer the following: How does the sentiment over the last *d* days/hours impact the price of Bitcoin *n* days/hours from now?
+
+Lets write another function that can do this transformation for us.
+
+```{r}
+agg_lag_df <- function(df, d){
+  
+  cols <- colnames(df)
+  cols <- cols[! cols %in% c('close','lead_close')]
+  e <- nrow(df)
+  print(e)
+  for (c in cols){
+  vname <- glue('{c}')
+    df <- df %>% 
+      
+        mutate( !!vname := roll_sum(.data[[c]], n_lag, align = "right", fill = NA))
+  }       
+
+  df <- df[n_lag + 1:(e-n_lag),]
+  df
+}
+```
+
 # Plotting some data
 
 First, lets write a function that takes in a the columns we want to chart, scales them to have a mean of 0 and standard deviation of 1, and plots them against each other.
@@ -169,6 +192,9 @@ These charts are particularly interesting, it seems that the total number of twe
 
 ```{r}
 df <- data.daily
+
+df <- agg_lag_df(df,30)
+
 cols <- c('total_reddit',
           "positive_reddit",
           'negative_reddit',
@@ -176,9 +202,12 @@ cols <- c('total_reddit',
           "positive_tweets",
           'negative_tweets'
           )
-plot_scaled_data(df, cols, 'close', 'Reddit Comments vs. Price (Scaled, Daily)', 'scatter')
+plot_scaled_data(df, cols, 'close', 'Reddit/Twitter Activity vs. Price (Scaled, Daily)', 'scatter')
 
 df <- data.hourly
+
+
+
 cols <- c('total_reddit',
           "positive_reddit",
           'negative_reddit',
@@ -186,7 +215,7 @@ cols <- c('total_reddit',
           "positive_tweets",
           'negative_tweets'
           )
-plot_scaled_data(df, cols, 'close', 'Reddit Comments vs. Price (Scaled, Daily)', 'scatter')
+plot_scaled_data(df, cols, 'close', 'Reddit/Twitter Activity vs. Price (Scaled, Daily)', 'scatter')
 ```
 
 There seems to be a very noticeable correlation between the converation activity and the price of Bitcoin. We will want to explore this in our regression analysis.
@@ -199,6 +228,7 @@ Because we are now looking at changes in the price from time t-1 to time t, we w
 
 #Start by shifting the close price n periods
 df <- shift_df(data.daily, 1)[1:nrow(data.daily),]
+
 
 cols <- c('total_reddit',
           "positive_reddit",
