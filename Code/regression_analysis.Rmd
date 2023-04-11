@@ -214,6 +214,7 @@ df.daily <- shift_df(data.daily, 1)[,c('lead_close',
 daily.lin_lin <- lm(lead_close ~ ., data = df.daily)
 summary(daily.lin_lin)
 vif(daily.lin_lin)
+cross_validate(df.daily,daily.lin_lin)
 ```
 
 Here we get an r^2^ of .6, but our VIF's are still large. Looking at the summary, only "negative tweets" has an obviously lower p value, so there's not one clear feature we would want to retain.
@@ -314,7 +315,7 @@ summary(daily.lin_lin.pca)
 print('VIF:')
 vif(daily.lin_lin.pca)
 cross_validate(df.daily.all.pca.3,daily.lin_lin.pca)
-plot(daily.lin_lin.pca)
+
 ```
 
 Now, we have a model with a r^2^ of .71, and all VIF are below 5, indicating no multicollinearity! Only thing left to do now is to cross validate the model:
@@ -376,10 +377,12 @@ df.daily.all <- shift_df(data.daily, 1)[,c('lead_close',
            'volume',                                       
            'total_reddit',
            'total_tweets')] %>% agg_lag_df(7)
-total_models <- lm((lead_close) ~ (volume) +total_reddit+ total_tweets, df.daily.all)
+total_models <- lm(lead_close ~ volume +total_reddit+ total_tweets, df.daily.all)
 vif(total_models)
 summary(total_models)
 plot(total_models)
+cross_validate(df.daily.all,total_models)
+durbinWatsonTest(total_models)
 ```
 
 Here, we see the VIF
@@ -467,15 +470,16 @@ barplot(pca.var.per,
 ```
 
 ```{r}
-df.daily.all.pca.5 <- as.data.frame(cbind(df.daily.all.pca$x[,1:5],
-                                      df.daily.all[,'lead_close']))
+df.hourly.all.pca.4 <- as.data.frame(cbind(df.hourly.all.pca$x[,1:4],
+                                      df.hourly.all[,'lead_close']))
    
-daily.lin_lin.pca <- lm(lead_close~. ,
-                        data = df.daily.all.pca.5)
+hourly.lin_lin.pca <- lm(lead_close~. ,
+                        data = df.hourly.all.pca.4)
 
-summary(daily.lin_lin.pca)
-vif(daily.lin_lin.pca)
-plot(daily.lin_lin.pca)
+summary(hourly.lin_lin.pca)
+vif(hourly.lin_lin.pca)
+plot(hourly.lin_lin.pca)
+cross_validate(df.hourly.all.pca.4, hourly.lin_lin.pca)
 ```
 
 ## Simple Model - Less Variables
@@ -485,11 +489,12 @@ df.hourly.all <- shift_df(data.hourly, 1)[,c('lead_close',
            'volume',                                       
            'total_reddit',
            'total_tweets')] %>% agg_lag_df(6)
-total_models <- lm(log(lead_close) ~ (volume) +total_reddit+ total_tweets,
+total_models <- lm(lead_close ~ volume +total_reddit+ total_tweets,
                    df.hourly.all)
 vif(total_models)
 summary(total_models)
 plot(total_models)
+cross_validate(df.hourly.all,total_models)
 ```
 
 ```{r}
