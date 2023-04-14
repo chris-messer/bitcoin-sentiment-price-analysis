@@ -29,6 +29,7 @@ library(car)
 library(quantmod)
 library(MASS)
 library(corrplot)
+library(caret)
 ```
 
 Now bring in the data:
@@ -113,10 +114,11 @@ run_intervals <- function(df, form, N, response_var){
     m <- lm(formula(form), mdf)
     
     print(n)
-    print(cross_validate(mdf, m, response_var))
+    print(validate_model(mdf, m, response_var))
   }
   
 }
+
 
 ```
 
@@ -163,32 +165,59 @@ summary(daily.lin_lin)
 
 ```
 
-Our first model performed rather well - we can see here that .89% of the variance in bitcoin price is explained by how much people are talking about Bitcoin across reddit and Twitter the 7 days before. However, there are a few things that we need to consider before taking that at face value. First, we need to cross validate that model and ensure it was not overfit. We will do that now. We'll build a function we can reuse on other lin-lin models.
+Our first model performed rather well - we can see here that .89% of the variance in bitcoin price is explained by how much people are talking about Bitcoin across reddit and Twitter the 7 days before. However, there are a few things that we need to consider before taking that at face value. First, we need to validate that model and ensure it was not overfit. We will do that now. We'll build a function we can reuse on other lin-lin models.
 
 ```{r}
-cross_validate <- function(df, model){
+
+validate_model <- function(df, model){
+    
+    sample_size <- floor(.8 * nrow(df))
+
+
+    train <-df[1:sample_size,]
+    test <- df[(sample_size +1) :nrow(df),]
+
   
       
-    m.cv <- cv.lm(df, model, m=5, seed=10, printit=F, plotit =F)
-    
+    m <- cv.lm(df, model, m=5, seed=10, printit=F, plotit =F)
     response_var <- summary(model)$call$formula[[2]]
-    SSres <- attr(m.cv,"ms")*nrow(df)
+    SSres <- attr(m,"ms")*nrow(df)
     SStotal <- sum((df[[response_var]] - mean(df[[response_var]]))^2)
     rs <- 1- SSres/SStotal
     rs
   
 }
 
-cross_validate(df.daily, daily.lin_lin)
+t <- validate_model(df.daily, daily.lin_lin)
+t
 
+```
 
+```{r}
+df.daily <- shift_df(data.daily, 1)[,c('lead_close',
+           'positive_reddit', 
+           'neutral_reddit',
+           'negative_reddit',
+           'positive_tweets', 
+           'neutral_tweets',
+           'negative_tweets')] %>% agg_lag_df(7)
+
+daily.lin_lin <- lm(lead_close ~ ., data = df.daily)
+summary(daily.lin_lin)
+vif(daily.lin_lin)
+validate_model(df.daily,daily.lin_lin)
+
+attributes(daily.lin_lin$model)$terms[1]$
+daily.lin_lin$call
+
+formula(daily.lin_lin)
 ```
 
 Looks like we get a warning here. Some quick research tells us that this error is telling us one of two things. Either A.) Two predictor variables are perfectly correlated or B.) You have more model parameters than observations in the dataset.
 
 ### Collinearity
 
-The first assumption we will address is collinearity. That is, the assumption that our predictor variables are correlated to one another. Intuitively, we can assume that they are correlated. The features we are using are the total tweets which is just the total of the positive, negative, and neutral tweets, and for Reddit, the total comments This is why our cross validated model through the error:
+The first assumption we will address is collinearity. That is, the assumption that our predictor variables are correlated to one another. Intuitively, we can assume that they are correlated. The features we are using are the total tweets which is just the total of the positive, negative, and neutral tweets, and for Reddit, the total comments This is why our validated model through the error:
 
     Warning: prediction from a rank-deficient fit may be misleading
 
@@ -214,7 +243,7 @@ df.daily <- shift_df(data.daily, 1)[,c('lead_close',
 daily.lin_lin <- lm(lead_close ~ ., data = df.daily)
 summary(daily.lin_lin)
 vif(daily.lin_lin)
-cross_validate(df.daily,daily.lin_lin)
+validate_model(df.daily,daily.lin_lin)
 ```
 
 Here we get an r^2^ of .6, but our VIF's are still large. Looking at the summary, only "negative tweets" has an obviously lower p value, so there's not one clear feature we would want to retain.
@@ -314,14 +343,14 @@ daily.lin_lin.pca <- lm(lead_close~. ,
 summary(daily.lin_lin.pca)
 print('VIF:')
 vif(daily.lin_lin.pca)
-cross_validate(df.daily.all.pca.3,daily.lin_lin.pca)
+validate_model(df.daily.all.pca.3,daily.lin_lin.pca)
 
 ```
 
 Now, we have a model with a r^2^ of .71, and all VIF are below 5, indicating no multicollinearity! Only thing left to do now is to cross validate the model:
 
 ```{r}
-cross_validate(df.daily.all.pca.3,daily.lin_lin.pca)
+validate_model(df.daily.all.pca.3,daily.lin_lin.pca)
 ```
 
 #### Correlation of error terms
@@ -381,7 +410,7 @@ total_models <- lm(lead_close ~ volume +total_reddit+ total_tweets, df.daily.all
 vif(total_models)
 summary(total_models)
 plot(total_models)
-cross_validate(df.daily.all,total_models)
+validate_model(df.daily.all,total_models)
 durbinWatsonTest(total_models)
 ```
 
@@ -407,7 +436,7 @@ df.hourly <- shift_df(data.hourly, 1)[,c('lead_close',
 
 hourly.lin_lin <- lm(lead_close ~ ., data = df.hourly)
 summary(hourly.lin_lin)
-cross_validate(df.hourly, hourly.lin_lin)
+validate_model(df.hourly, hourly.lin_lin)
 vif(hourly.lin_lin)
 plot(hourly.lin_lin)
 ```
@@ -479,7 +508,7 @@ hourly.lin_lin.pca <- lm(lead_close~. ,
 summary(hourly.lin_lin.pca)
 vif(hourly.lin_lin.pca)
 plot(hourly.lin_lin.pca)
-cross_validate(df.hourly.all.pca.4, hourly.lin_lin.pca)
+validate_model(df.hourly.all.pca.4, hourly.lin_lin.pca)
 ```
 
 ## Simple Model - Less Variables
@@ -494,7 +523,7 @@ total_models <- lm(lead_close ~ volume +total_reddit+ total_tweets,
 vif(total_models)
 summary(total_models)
 plot(total_models)
-cross_validate(df.hourly.all,total_models)
+validate_model(df.hourly.all,total_models)
 ```
 
 ```{r}
